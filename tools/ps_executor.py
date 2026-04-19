@@ -31,7 +31,10 @@ def _jsx_string(text: str) -> str:
 
 def _eval(jsx: str) -> str:
     """Execute JSX in the running Photoshop instance."""
-    return _app().eval_(jsx.strip())
+    app = _app()
+    if hasattr(app, 'DoJavaScript'):
+        return app.DoJavaScript(jsx.strip())
+    return app.eval_(jsx.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +305,97 @@ def apply_drop_shadow(
     """
     _eval(jsx)
     return {"status": "shadow_applied", "layer": layer_name}
+
+
+# ---------------------------------------------------------------------------
+# Image placement
+# ---------------------------------------------------------------------------
+
+def place_image_as_background(file_path: str, layer_name: str = "Foto fondo") -> dict:
+    """Place a JPG/PNG as a smart object scaled to fill the canvas (cover mode)."""
+    file_path = file_path.replace("\\", "/")
+    name_escaped = _jsx_string(layer_name)
+    jsx = f"""
+    var doc = app.activeDocument;
+    var canvasW = doc.width.as('px');
+    var canvasH = doc.height.as('px');
+
+    // Place image as smart object
+    var placeDesc = new ActionDescriptor();
+    placeDesc.putPath(charIDToTypeID("null"), new File("{_jsx_string(file_path)}"));
+    placeDesc.putEnumerated(charIDToTypeID("FTcs"), charIDToTypeID("QCSt"), charIDToTypeID("Qcsa"));
+    executeAction(charIDToTypeID("Plc "), placeDesc, DialogModes.NO);
+
+    var lyr = doc.activeLayer;
+    lyr.name = "{name_escaped}";
+
+    // Get current bounds and compute scale to cover canvas
+    var bounds = lyr.bounds;
+    var imgW = bounds[2].as('px') - bounds[0].as('px');
+    var imgH = bounds[3].as('px') - bounds[1].as('px');
+    var scaleX = (canvasW / imgW) * 100;
+    var scaleY = (canvasH / imgH) * 100;
+    var scale = Math.max(scaleX, scaleY);
+
+    // Resize to cover
+    lyr.resize(scale, scale, AnchorPosition.MIDDLECENTER);
+
+    // Center on canvas
+    var nb = lyr.bounds;
+    var lyrW = nb[2].as('px') - nb[0].as('px');
+    var lyrH = nb[3].as('px') - nb[1].as('px');
+    var deltaX = (canvasW - lyrW) / 2 - nb[0].as('px');
+    var deltaY = (canvasH - lyrH) / 2 - nb[1].as('px');
+    lyr.translate(deltaX, deltaY);
+
+    // Move to bottom of stack
+    lyr.moveToEnd();
+    lyr.name;
+    """
+    _eval(jsx)
+    return {"status": "background_placed", "layer": layer_name, "file": file_path}
+
+
+def place_image_at(
+    file_path: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    layer_name: str = "Image",
+) -> dict:
+    """Place a JPG/PNG as a smart object at a specific position and size."""
+    file_path = file_path.replace("\\", "/")
+    name_escaped = _jsx_string(layer_name)
+    jsx = f"""
+    var doc = app.activeDocument;
+
+    var placeDesc = new ActionDescriptor();
+    placeDesc.putPath(charIDToTypeID("null"), new File("{_jsx_string(file_path)}"));
+    placeDesc.putEnumerated(charIDToTypeID("FTcs"), charIDToTypeID("QCSt"), charIDToTypeID("Qcsa"));
+    executeAction(charIDToTypeID("Plc "), placeDesc, DialogModes.NO);
+
+    var lyr = doc.activeLayer;
+    lyr.name = "{name_escaped}";
+
+    // Get current size
+    var bounds = lyr.bounds;
+    var imgW = bounds[2].as('px') - bounds[0].as('px');
+    var imgH = bounds[3].as('px') - bounds[1].as('px');
+
+    // Scale to target size
+    var scaleX = ({width} / imgW) * 100;
+    var scaleY = ({height} / imgH) * 100;
+    lyr.resize(scaleX, scaleY, AnchorPosition.TOPLEFT);
+
+    // Move to target position
+    var nb = lyr.bounds;
+    lyr.translate({x} - nb[0].as('px'), {y} - nb[1].as('px'));
+
+    lyr.name;
+    """
+    _eval(jsx)
+    return {"status": "image_placed", "layer": layer_name, "x": x, "y": y, "width": width, "height": height}
 
 
 # ---------------------------------------------------------------------------

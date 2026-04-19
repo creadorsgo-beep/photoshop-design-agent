@@ -28,8 +28,11 @@ from tools.ps_executor import (
     apply_drop_shadow,
     export_as_png,
     export_as_jpg,
+    place_image_as_background,
+    place_image_at,
 )
 from tools.drive_reader import list_files, read_document
+from tools.chrome_controller import generate_image_flow, take_flow_screenshot, explore_flow_ui
 
 client = anthropic.Anthropic()
 
@@ -43,6 +46,7 @@ You have access to tools for:
   • Reading content plans from Google Drive
   • Analyzing existing PSD files to extract brand style (colors, fonts, layout, composition)
   • Creating designs in Adobe Photoshop step by step
+  • Generating photos and illustrations via Google Labs Flow (Chrome automation)
 
 ## Client style guide workflow
 
@@ -89,6 +93,26 @@ When asked to create a design for a known client:
 - For 1080×1080: safe zone starts at x=60, y=60; ends at x=1020, y=1020
 - Contrast: light text on dark backgrounds, dark text on light backgrounds
 - Don't overcrowd — fewer elements with good spacing look more professional
+
+## Image generation with Google Labs Flow
+
+When a design needs a photo, texture, or illustration:
+1. Call `generate_image` with a carefully crafted prompt
+2. Once you have the path, use `place_image_as_background` or `place_image_at`
+3. Continue building the design on top
+
+### How to write great Flow prompts
+
+Structure: **[Subject] + [Setting/Context] + [Lighting] + [Mood/Atmosphere] + [Style] + [Technical]**
+
+Examples by use case:
+- Food/café: "freshly brewed espresso in a ceramic cup, golden hour light from window, warm amber tones, steam rising, shallow depth of field, photorealistic, Canon 5D"
+- Architecture/place: "colonial stone archway in Latin America, late afternoon sun, vines growing on walls, cinematic wide shot, warm terracotta palette, 8k"
+- Abstract/texture: "warm terracotta and cream linen texture, minimal, flat, close-up macro shot, soft natural light"
+- People: "young professional woman smiling in a modern café, candid, natural window light, shallow DOF, authentic, photorealistic"
+
+Always match the image tone to the brand color palette from the client style guide.
+If Chrome/Flow is unavailable, use `inspect_flow` to diagnose the connection.
 
 Always save as PSD and export as PNG when finished."""
 
@@ -391,6 +415,84 @@ TOOLS = [
             "required": ["output_path"],
         },
     },
+    {
+        "name": "place_image_as_background",
+        "description": "Place a JPG or PNG as a smart object background, scaled to fill the entire canvas (cover mode). Use this for photo backgrounds.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the image file"},
+                "layer_name": {"type": "string", "description": "Name for the layer"},
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "name": "generate_image",
+        "description": (
+            "Generate a photo or illustration via Google Labs Flow (AI image generator) "
+            "running in Chrome. Use this when the design needs a realistic photo, texture, "
+            "background image, or any visual that doesn't exist as a file. "
+            "Craft the prompt to match the brand style and design goal. "
+            "Returns the path to the saved PNG, which you can then place_image_as_background or place_image_at."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "Detailed image generation prompt. Be specific: subject, lighting, "
+                        "mood, color palette, style (photorealistic, illustration, etc.), "
+                        "composition. Example: 'A cozy Latin American coffee shop at golden hour, "
+                        "warm amber light through wooden shutters, rustic stone walls, "
+                        "espresso cups on marble counter, bokeh background, photorealistic'"
+                    ),
+                },
+                "style_suffix": {
+                    "type": "string",
+                    "description": (
+                        "Extra style keywords appended to the prompt, e.g. "
+                        "'cinematic, 8k, photorealistic, shot on Canon 5D' or "
+                        "'flat design, minimal, vector art'"
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Where to save the PNG. Auto-generated from prompt if empty.",
+                },
+                "wait_seconds": {
+                    "type": "integer",
+                    "description": "Max seconds to wait for generation (default 60)",
+                },
+            },
+            "required": ["prompt"],
+        },
+    },
+    {
+        "name": "inspect_flow",
+        "description": (
+            "Take a screenshot of Google Labs Flow in Chrome and return UI element info. "
+            "Use this to diagnose issues or understand the current state of the browser."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "place_image_at",
+        "description": "Place a JPG or PNG as a smart object at a specific position and size. Use this for logos and icons.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the image file"},
+                "x": {"type": "integer", "description": "Left edge in pixels"},
+                "y": {"type": "integer", "description": "Top edge in pixels"},
+                "width": {"type": "integer", "description": "Target width in pixels"},
+                "height": {"type": "integer", "description": "Target height in pixels"},
+                "layer_name": {"type": "string", "description": "Name for the layer"},
+            },
+            "required": ["file_path", "x", "y", "width", "height"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -501,6 +603,24 @@ def _execute_tool(name: str, tool_input: dict) -> str:
             )
             return json.dumps(result)
 
+        elif name == "place_image_as_background":
+            result = place_image_as_background(
+                tool_input["file_path"],
+                tool_input.get("layer_name", "Foto fondo"),
+            )
+            return json.dumps(result)
+
+        elif name == "place_image_at":
+            result = place_image_at(
+                tool_input["file_path"],
+                tool_input["x"],
+                tool_input["y"],
+                tool_input["width"],
+                tool_input["height"],
+                tool_input.get("layer_name", "Image"),
+            )
+            return json.dumps(result)
+
         elif name == "export_design_png":
             result = export_as_png(tool_input["output_path"])
             return json.dumps(result)
@@ -515,6 +635,19 @@ def _execute_tool(name: str, tool_input: dict) -> str:
         elif name == "save_design_psd":
             result = save_as_psd(tool_input["output_path"])
             return json.dumps(result)
+
+        elif name == "generate_image":
+            result = generate_image_flow(
+                prompt=tool_input["prompt"],
+                output_path=tool_input.get("output_path", ""),
+                style_suffix=tool_input.get("style_suffix", ""),
+                wait_seconds=tool_input.get("wait_seconds", 60),
+            )
+            return json.dumps(result)
+
+        elif name == "inspect_flow":
+            result = explore_flow_ui()
+            return json.dumps(result, indent=2)
 
         else:
             return json.dumps({"error": f"Unknown tool: {name}"})
@@ -542,7 +675,7 @@ def run_agent(user_request: str, verbose: bool = True) -> str:
 
     while True:
         if verbose:
-            print("Thinking…")
+            print("Thinking...")
 
         with client.messages.stream(
             model="claude-opus-4-7",
@@ -572,16 +705,16 @@ def run_agent(user_request: str, verbose: bool = True) -> str:
             for block in response.content:
                 if block.type == "tool_use":
                     if verbose:
-                        print(f"\n→ Tool: {block.name}")
+                        print(f"\n>> Tool: {block.name}")
                         input_preview = json.dumps(block.input, ensure_ascii=False)
                         if len(input_preview) > 300:
-                            input_preview = input_preview[:300] + "…"
+                            input_preview = input_preview[:300] + "..."
                         print(f"  Input: {input_preview}")
 
                     result = _execute_tool(block.name, block.input)
 
                     if verbose:
-                        preview = result[:200] + "…" if len(result) > 200 else result
+                        preview = result[:200] + "..." if len(result) > 200 else result
                         print(f"  Result: {preview}")
 
                     tool_results.append({

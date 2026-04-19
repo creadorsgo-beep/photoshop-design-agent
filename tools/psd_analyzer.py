@@ -4,10 +4,30 @@ Uses psd-tools (no Photoshop required) to parse the binary PSD format.
 """
 
 import os
+import re
 from collections import Counter
 from psd_tools import PSDImage
-from psd_tools.constants import LayerKind
+from psd_tools.constants import Tag
 from PIL import Image
+
+
+def _parse_font_set_from_raw(raw_bytes: bytes) -> list[str]:
+    """Extract FontSet names from raw EngineData bytes (UTF-16 encoded)."""
+    fonts = []
+    # Isolate the FontSet block before ParagraphSheetSet / DocumentResources
+    section_match = re.search(rb'FontSet \[(.*?)\]\s*\n', raw_bytes, re.DOTALL)
+    if not section_match:
+        return fonts
+    section = section_match.group(1)
+    matches = re.findall(rb'/Name \((\xfe\xff[^\)]+)\)', section)
+    for m in matches:
+        try:
+            name = m.decode("utf-16")
+            if name and "Invis" not in name:
+                fonts.append(name)
+        except Exception:
+            pass
+    return list(dict.fromkeys(fonts))
 
 
 def _rgb_to_hex(r: int, g: int, b: int) -> str:
@@ -39,34 +59,47 @@ def _extract_text_styling(layer) -> dict:
     """Pull font, size, color, and spacing from a text layer's engine data."""
     styling = {}
     try:
-        if not (hasattr(layer, "engine_data") and layer.engine_data):
+        tb = getattr(layer, "tagged_blocks", None)
+        if not tb:
             return styling
-        ed = layer.engine_data
-        run_array = (
-            ed.get("EngineDict", {}).get("StyleRun", {}).get("RunArray", [])
-        )
-        for run in run_array:
-            style_data = (
-                run.get("StyleSheet", {}).get("StyleSheetData", {})
-            )
+        tytool = tb.get(Tag.TYPE_TOOL_OBJECT_SETTING)
+        if not tytool:
+            return styling
 
-            font_obj = style_data.get("Font", {})
-            if isinstance(font_obj, dict):
-                name = font_obj.get("Name", "")
-                if name:
-                    styling["font_name"] = name
-                    styling["font_style"] = font_obj.get("StyleName", "")
+        text_data = tytool.data.text_data
+        engine_raw_obj = text_data.get(b"EngineData")
+        if not engine_raw_obj:
+            return styling
+
+        raw = engine_raw_obj.value.tobytes()
+
+        # Build font index -> name map from FontSet in raw bytes
+        font_set = _parse_font_set_from_raw(raw)
+
+        # Use engine_dict (already parsed) for size, color, tracking, font index
+        ed = layer.engine_dict
+        run_array = ed.get("StyleRun", {}).get("RunArray", [])
+        for run in run_array:
+            style_data = run.get("StyleSheet", {}).get("StyleSheetData", {})
+
+            font_idx = style_data.get("Font")
+            if font_idx is not None and int(font_idx) < len(font_set):
+                styling["font_name"] = font_set[int(font_idx)]
 
             size = style_data.get("FontSize")
             if size:
                 styling["font_size"] = round(float(size), 1)
 
-            styling["tracking"] = style_data.get("Tracking", 0)
-            styling["leading"] = style_data.get("Leading", 0)
+            tracking = style_data.get("Tracking")
+            styling["tracking"] = int(tracking) if tracking is not None else 0
+            leading = style_data.get("Leading")
+            styling["leading"] = round(float(leading), 3) if leading is not None else 0
 
             fill = style_data.get("FillColor", {}).get("Values", [])
             if len(fill) == 4:
-                r, g, b = int(fill[1] * 255), int(fill[2] * 255), int(fill[3] * 255)
+                r = int(float(fill[1]) * 255)
+                g = int(float(fill[2]) * 255)
+                b = int(float(fill[3]) * 255)
                 styling["color"] = _rgb_to_hex(r, g, b)
 
             if styling:
@@ -93,9 +126,9 @@ def _process_layer(layer, depth: int, state: dict) -> dict:
     }
 
     if hasattr(layer, "kind"):
-        info["type"] = layer.kind.name
+        info["type"] = str(layer.kind)
 
-    if hasattr(layer, "kind") and layer.kind == LayerKind.TYPE:
+    if hasattr(layer, "kind") and str(layer.kind) == "type":
         info["type"] = "TEXT"
         try:
             info["text_content"] = layer.text
