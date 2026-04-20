@@ -17,6 +17,7 @@ from googleapiclient.discovery import build
 SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/documents.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 
 
@@ -82,12 +83,63 @@ def list_files(folder_id: str | None = None, file_type: str = "all") -> list[dic
     return results.get("files", [])
 
 
-def read_document(doc_id: str) -> str:
+def read_sheet(sheet_id: str, range_: str = "") -> str:
     """
-    Read the full plain-text content of a Google Document.
-    Returns a single string with paragraph breaks.
+    Read a Google Spreadsheet and return its content as a formatted text table.
+    Detects all sheets automatically if no range is specified.
     """
     creds = _get_credentials()
+    service = build("sheets", "v4", credentials=creds)
+
+    # Get sheet metadata
+    meta = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    title = meta.get("properties", {}).get("title", "")
+    sheets = meta.get("sheets", [])
+
+    lines = [f"# {title}\n"]
+
+    for sheet in sheets:
+        sheet_name = sheet["properties"]["title"]
+        lines.append(f"\n## Hoja: {sheet_name}\n")
+
+        result = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=sheet_id, range=sheet_name)
+            .execute()
+        )
+        rows = result.get("values", [])
+        if not rows:
+            lines.append("(vacía)")
+            continue
+
+        # Header separator
+        max_cols = max(len(r) for r in rows)
+        for i, row in enumerate(rows):
+            # Pad short rows
+            padded = row + [""] * (max_cols - len(row))
+            lines.append(" | ".join(padded))
+            if i == 0:
+                lines.append("-" * (sum(max(len(str(c)) for c in col) for col in zip(*rows)) + max_cols * 3))
+
+    return "\n".join(lines)
+
+
+def read_document(doc_id: str) -> str:
+    """
+    Read a Google Document or Spreadsheet — auto-detects the file type.
+    Returns plain-text content.
+    """
+    creds = _get_credentials()
+    # Detect file type via Drive API
+    drive_service = build("drive", "v3", credentials=creds)
+    meta = drive_service.files().get(fileId=doc_id, fields="mimeType,name").execute()
+    mime = meta.get("mimeType", "")
+
+    if "spreadsheet" in mime:
+        return read_sheet(doc_id)
+
+    # Google Doc
     docs_service = build("docs", "v1", credentials=creds)
 
     doc = docs_service.documents().get(documentId=doc_id).execute()

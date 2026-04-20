@@ -23,6 +23,7 @@ from tools.ps_executor import (
     save_as_psd,
     set_background_color,
     add_gradient_background,
+    add_gradient_overlay,
     add_rectangle,
     add_text_layer,
     apply_drop_shadow,
@@ -91,6 +92,7 @@ When asked to create a design for a known client:
 - Keep generous margins (at least 5% of canvas width from edges)
 - Text Y position: add font_size to Y for the visual top of the text (baseline offset)
 - For 1080×1080: safe zone starts at x=60, y=60; ends at x=1020, y=1020
+- For 1080×1920 Stories/Reels: MANDATORY safe zone x=65–1015, y=250–1670 (Instagram overlays UI outside this area). Photo can be full-bleed but ALL text, logos and key elements must stay inside this zone.
 - Contrast: light text on dark backgrounds, dark text on light backgrounds
 - Don't overcrowd — fewer elements with good spacing look more professional
 

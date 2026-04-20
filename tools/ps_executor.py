@@ -49,8 +49,9 @@ def create_document(name: str, width: int, height: int, resolution: int = 72) ->
 
 
 def open_template(file_path: str) -> dict:
-    """Open an existing PSD file in Photoshop."""
+    """Open an existing PSD/JPG/PNG file in Photoshop, suppressing all dialogs."""
     app = _app()
+    app.displayDialogs = 3  # DialogModes.NO — suppresses color profile and other dialogs
     file_path = file_path.replace("\\", "/")
     doc = app.open(file_path)
     return {
@@ -162,6 +163,89 @@ def add_gradient_background(
     """
     _eval(jsx)
     return {"status": "gradient_added", "layer": layer_name}
+
+
+# ---------------------------------------------------------------------------
+# Gradient overlay (dark-to-transparent, for text legibility)
+# ---------------------------------------------------------------------------
+
+def add_gradient_overlay(
+    height: int = 600,
+    opacity: int = 60,
+    layer_name: str = "Overlay degradado",
+    from_bottom: bool = False,
+) -> dict:
+    """
+    Add a black-to-transparent gradient layer over the top (or bottom) of the canvas.
+    Uses PS opacity stops so the gradient truly fades to transparent — no solid block.
+    opacity: overall layer opacity (0-100). Keep subtle: 50-70.
+    from_bottom: if True, gradient goes dark at bottom fading upward.
+    """
+    name_escaped = _jsx_string(layer_name)
+    angle = 270 if from_bottom else 90
+    # Compute selection coords in Python to avoid f-string conditional issues
+    y0_expr = f"canvasH - {height}" if from_bottom else "0"
+    y1_expr = "canvasH" if from_bottom else str(height)
+    jsx = f"""
+    app.displayDialogs = DialogModes.NO;
+    var doc = app.activeDocument;
+    var canvasW = doc.width.as('px');
+    var canvasH = doc.height.as('px');
+
+    var lyr = doc.artLayers.add();
+    lyr.name = "{name_escaped}";
+
+    var y0 = {y0_expr};
+    var y1 = {y1_expr};
+    var region = [[0,y0],[canvasW,y0],[canvasW,y1],[0,y1]];
+    doc.selection.select(region);
+
+    // Build gradient: black with opacity stops 100%→0%
+    var gradDef = new ActionDescriptor();
+    gradDef.putEnumerated(charIDToTypeID("GrdT"), charIDToTypeID("GrdT"), charIDToTypeID("CStr"));
+    gradDef.putString(charIDToTypeID("Nm  "), "DarkFade");
+
+    var stopList = new ActionList();
+    var cs = new ActionDescriptor();
+    var col = new ActionDescriptor();
+    col.putDouble(charIDToTypeID("Rd  "), 0);
+    col.putDouble(charIDToTypeID("Grn "), 0);
+    col.putDouble(charIDToTypeID("Bl  "), 0);
+    cs.putObject(charIDToTypeID("Clr "), charIDToTypeID("RGBC"), col);
+    cs.putEnumerated(charIDToTypeID("Type"), charIDToTypeID("Clry"), charIDToTypeID("UsrS"));
+    cs.putInteger(charIDToTypeID("Lctn"), 0);
+    cs.putInteger(charIDToTypeID("Mdpn"), 50);
+    stopList.putObject(charIDToTypeID("Clrt"), cs);
+    gradDef.putList(charIDToTypeID("Clrs"), stopList);
+
+    var transList = new ActionList();
+    var t1 = new ActionDescriptor();
+    t1.putInteger(charIDToTypeID("Opct"), 100);
+    t1.putInteger(charIDToTypeID("Lctn"), 0);
+    t1.putInteger(charIDToTypeID("Mdpn"), 50);
+    transList.putObject(charIDToTypeID("TrnS"), t1);
+    var t2 = new ActionDescriptor();
+    t2.putInteger(charIDToTypeID("Opct"), 0);
+    t2.putInteger(charIDToTypeID("Lctn"), 4096);
+    t2.putInteger(charIDToTypeID("Mdpn"), 50);
+    transList.putObject(charIDToTypeID("TrnS"), t2);
+    gradDef.putList(charIDToTypeID("Trns"), transList);
+
+    var gDesc = new ActionDescriptor();
+    gDesc.putObject(charIDToTypeID("Grad"), charIDToTypeID("Grdn"), gradDef);
+    gDesc.putUnitDouble(charIDToTypeID("Angl"), charIDToTypeID("#Ang"), {angle});
+    gDesc.putEnumerated(charIDToTypeID("Type"), charIDToTypeID("GrdT"), charIDToTypeID("Lnr "));
+    gDesc.putBoolean(charIDToTypeID("Rvrs"), false);
+    gDesc.putBoolean(charIDToTypeID("Algn"), true);
+    gDesc.putUnitDouble(charIDToTypeID("Scl "), charIDToTypeID("#Prc"), 100);
+
+    executeAction(charIDToTypeID("FlCn"), gDesc, DialogModes.NO);
+    doc.selection.deselect();
+    lyr.opacity = {opacity};
+    lyr.name;
+    """
+    _eval(jsx)
+    return {{"status": "gradient_overlay_added", "layer": layer_name, "height": height, "opacity": opacity}}
 
 
 # ---------------------------------------------------------------------------
@@ -312,45 +396,46 @@ def apply_drop_shadow(
 # ---------------------------------------------------------------------------
 
 def place_image_as_background(file_path: str, layer_name: str = "Foto fondo") -> dict:
-    """Place a JPG/PNG as a smart object scaled to fill the canvas (cover mode)."""
+    """Place a JPG/PNG scaled to fill the canvas (cover mode) via open+copy+paste."""
     file_path = file_path.replace("\\", "/")
     name_escaped = _jsx_string(layer_name)
     jsx = f"""
-    var doc = app.activeDocument;
-    var canvasW = doc.width.as('px');
-    var canvasH = doc.height.as('px');
+    var targetDoc = app.activeDocument;
+    var canvasW = targetDoc.width.as('px');
+    var canvasH = targetDoc.height.as('px');
 
-    // Place image as smart object
-    var placeDesc = new ActionDescriptor();
-    placeDesc.putPath(charIDToTypeID("null"), new File("{_jsx_string(file_path)}"));
-    placeDesc.putEnumerated(charIDToTypeID("FTcs"), charIDToTypeID("QCSt"), charIDToTypeID("Qcsa"));
-    executeAction(charIDToTypeID("Plc "), placeDesc, DialogModes.NO);
+    // Open the image in a temp document
+    var imgDoc = app.open(new File("{_jsx_string(file_path)}"));
+    var srcW = imgDoc.width.as('px');
+    var srcH = imgDoc.height.as('px');
 
-    var lyr = doc.activeLayer;
-    lyr.name = "{name_escaped}";
+    // Flatten, select all, copy
+    imgDoc.flatten();
+    imgDoc.selection.selectAll();
+    imgDoc.selection.copy();
+    imgDoc.close(SaveOptions.DONOTSAVECHANGES);
 
-    // Get current bounds and compute scale to cover canvas
-    var bounds = lyr.bounds;
-    var imgW = bounds[2].as('px') - bounds[0].as('px');
-    var imgH = bounds[3].as('px') - bounds[1].as('px');
-    var scaleX = (canvasW / imgW) * 100;
-    var scaleY = (canvasH / imgH) * 100;
+    // Paste into target document
+    app.activeDocument = targetDoc;
+    var layer = targetDoc.paste();
+    layer.name = "{name_escaped}";
+
+    // Scale to cover canvas
+    var scaleX = (canvasW / srcW) * 100;
+    var scaleY = (canvasH / srcH) * 100;
     var scale = Math.max(scaleX, scaleY);
-
-    // Resize to cover
-    lyr.resize(scale, scale, AnchorPosition.MIDDLECENTER);
+    layer.resize(scale, scale, AnchorPosition.MIDDLECENTER);
 
     // Center on canvas
-    var nb = lyr.bounds;
+    var nb = layer.bounds;
     var lyrW = nb[2].as('px') - nb[0].as('px');
     var lyrH = nb[3].as('px') - nb[1].as('px');
     var deltaX = (canvasW - lyrW) / 2 - nb[0].as('px');
     var deltaY = (canvasH - lyrH) / 2 - nb[1].as('px');
-    lyr.translate(deltaX, deltaY);
+    layer.translate(deltaX, deltaY);
 
-    // Move to bottom of stack
-    lyr.moveToEnd();
-    lyr.name;
+    layer.moveToEnd();
+    layer.name;
     """
     _eval(jsx)
     return {"status": "background_placed", "layer": layer_name, "file": file_path}
