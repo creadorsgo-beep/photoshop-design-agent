@@ -396,49 +396,46 @@ def apply_drop_shadow(
 # ---------------------------------------------------------------------------
 
 def place_image_as_background(file_path: str, layer_name: str = "Foto fondo") -> dict:
-    """Place a JPG/PNG scaled to fill the canvas (cover mode) via open+copy+paste."""
+    """Place a JPG/PNG as a Smart Object scaled to fill the canvas (cover mode)."""
     file_path = file_path.replace("\\", "/")
     name_escaped = _jsx_string(layer_name)
     jsx = f"""
-    var targetDoc = app.activeDocument;
-    var canvasW = targetDoc.width.as('px');
-    var canvasH = targetDoc.height.as('px');
+    app.displayDialogs = DialogModes.NO;
+    var doc = app.activeDocument;
+    var canvasW = doc.width.as('px');
+    var canvasH = doc.height.as('px');
 
-    // Open the image in a temp document
-    var imgDoc = app.open(new File("{_jsx_string(file_path)}"));
-    var srcW = imgDoc.width.as('px');
-    var srcH = imgDoc.height.as('px');
+    // Place as Smart Object (File > Place)
+    var placeDesc = new ActionDescriptor();
+    placeDesc.putPath(charIDToTypeID("null"), new File("{_jsx_string(file_path)}"));
+    placeDesc.putEnumerated(charIDToTypeID("FTcs"), charIDToTypeID("QCSt"), charIDToTypeID("Qcsa"));
+    executeAction(charIDToTypeID("Plc "), placeDesc, DialogModes.NO);
 
-    // Flatten, select all, copy
-    imgDoc.flatten();
-    imgDoc.selection.selectAll();
-    imgDoc.selection.copy();
-    imgDoc.close(SaveOptions.DONOTSAVECHANGES);
+    var lyr = doc.activeLayer;
+    lyr.name = "{name_escaped}";
 
-    // Paste into target document
-    app.activeDocument = targetDoc;
-    var layer = targetDoc.paste();
-    layer.name = "{name_escaped}";
-
-    // Scale to cover canvas
-    var scaleX = (canvasW / srcW) * 100;
-    var scaleY = (canvasH / srcH) * 100;
+    // Scale to cover canvas (cover mode)
+    var bounds = lyr.bounds;
+    var imgW = bounds[2].as('px') - bounds[0].as('px');
+    var imgH = bounds[3].as('px') - bounds[1].as('px');
+    var scaleX = (canvasW / imgW) * 100;
+    var scaleY = (canvasH / imgH) * 100;
     var scale = Math.max(scaleX, scaleY);
-    layer.resize(scale, scale, AnchorPosition.MIDDLECENTER);
+    lyr.resize(scale, scale, AnchorPosition.MIDDLECENTER);
 
     // Center on canvas
-    var nb = layer.bounds;
+    var nb = lyr.bounds;
     var lyrW = nb[2].as('px') - nb[0].as('px');
     var lyrH = nb[3].as('px') - nb[1].as('px');
     var deltaX = (canvasW - lyrW) / 2 - nb[0].as('px');
     var deltaY = (canvasH - lyrH) / 2 - nb[1].as('px');
-    layer.translate(deltaX, deltaY);
+    lyr.translate(deltaX, deltaY);
 
-    layer.moveToEnd();
-    layer.name;
+    lyr.moveToEnd();
+    lyr.name;
     """
     _eval(jsx)
-    return {"status": "background_placed", "layer": layer_name, "file": file_path}
+    return {"status": "background_placed_smart_object", "layer": layer_name, "file": file_path}
 
 
 def place_image_at(

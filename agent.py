@@ -13,6 +13,9 @@ Usage:
 """
 
 import json
+import os
+from dotenv import load_dotenv
+load_dotenv()
 import anthropic
 from tools.psd_analyzer import analyze_psd, analyze_folder
 from tools.style_memory import save_client_style, load_client_style, list_clients
@@ -79,12 +82,16 @@ When asked to create a design for a known client:
 4. **Build the design** — Execute step by step in Photoshop:
    a. create_new_design (or open_psd_template for existing base)
    b. set_background_color or add_gradient
-   c. add_rectangle for decorative blocks, panels, bars
-   d. add_text (headlines first, then body, then fine print)
-   e. apply_drop_shadow on text or elements for depth
-   f. export_design_png — always export at the end
+   c. place_image_as_background or place_image_at for all images — these create Smart Objects (editable, non-destructive)
+   d. add_rectangle for decorative blocks, panels, bars
+   e. add_text (headlines first, then body, then fine print)
+   f. apply_drop_shadow on text or elements for depth
+   g. save_design_psd — ALWAYS save as PSD at the end (layered, editable). Do NOT export PNG.
 
-5. **Report** — Confirm the output path and summarize what was created.
+5. **Report** — Confirm the PSD output path and summarize what was created.
+
+## Smart Objects rule
+ALL images (photos, logos, textures, generated images) must be placed via `place_image_as_background` or `place_image_at` — both use the Photoshop Place command which creates a Smart Object layer. NEVER flatten, rasterize, or paste pixels. The final file must be a fully editable layered PSD.
 
 ## Design principles
 - Match the extracted color palette exactly (hex values from the analysis)
