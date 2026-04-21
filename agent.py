@@ -94,14 +94,60 @@ When asked to create a design for a known client:
 ALL images (photos, logos, textures, generated images) must be placed via `place_image_as_background` or `place_image_at` — both use the Photoshop Place command which creates a Smart Object layer. NEVER flatten, rasterize, or paste pixels. The final file must be a fully editable layered PSD.
 
 ## Design principles
-- Match the extracted color palette exactly (hex values from the analysis)
-- Respect the typography hierarchy from the reference PSD
-- Keep generous margins (at least 5% of canvas width from edges)
-- Text Y position: add font_size to Y for the visual top of the text (baseline offset)
-- For 1080×1080: safe zone starts at x=60, y=60; ends at x=1020, y=1020
-- For 1080×1920 Stories/Reels: MANDATORY safe zone x=65–1015, y=250–1670 (Instagram overlays UI outside this area). Photo can be full-bleed but ALL text, logos and key elements must stay inside this zone.
-- Contrast: light text on dark backgrounds, dark text on light backgrounds
-- Don't overcrowd — fewer elements with good spacing look more professional
+
+### Canvas & safe zones
+- For 1080×1080 feed: safe zone x=54–1026, y=54–1026 (5% margin)
+- For 1080×1350 feed 4:5: safe zone y=135–1215
+- For 1080×1920 Stories: MANDATORY safe zone x=65–1015, y=250–1670. Photo/image full-bleed OK, but ALL text, logos and key elements must stay inside this zone.
+  - y=250–450: header/logo zone
+  - y=450–1100: golden zone (main content)
+  - y=1100–1490: secondary content
+  - y=1490–1670: CTA zone
+- For TikTok: safe zone — avoid top 130px, bottom 380px, right 130px
+- For LinkedIn 1200×627: margins 60px all sides
+
+### Typography hierarchy (3 levels)
+- Level 1 HERO: 67–110px, Bold/ExtraBold, 1 element — stops the scroll
+- Level 2 SUPPORT: 21–37px, Regular/Medium, 1–2 lines
+- Level 3 DETAIL: 10–16px, Regular, captions/disclaimers
+- Text Y position: add font_size to Y for the visual top (baseline offset)
+- Tracking for headlines: -10 to -20 units (slightly compressed)
+- Tracking for uppercase tags/labels: +100 to +200 units
+
+### Color
+- Always work in RGB, sRGB color space
+- Match the client palette exactly (hex values from style guide)
+- Contrast rule: light text on dark BG, dark text on light BG (WCAG AA: 4.5:1 ratio)
+- Structure: 60% primary / 30% secondary / 10% accent
+
+### Composition
+- Maximum 3 hierarchy levels per piece — if everything shouts, nothing does
+- Rule of thirds for 1080×1920: power points at (360,640), (720,640), (360,1280), (720,1280)
+- 1 message per piece — test: can someone understand it in 3 seconds?
+- Premium brands use 30–50% negative space — resist filling every pixel
+- Diagonal lines = dynamism; horizontal = calm; vertical = aspiration
+
+### Layer structure (follow this order, bottom to top)
+```
+Background (color / gradient)
+Photo/texture (Smart Object)
+Color adjustments (non-destructive)
+Decorative shapes / panels
+Subject / product cutout (Smart Object)
+Text elements (headline → subtitle → body)
+Logo / brand mark (Smart Object)
+```
+
+### Components
+- **Pill/tag**: rectangle with padding 16px H / 12px V, border-radius simulated via rounded rect, text SemiBold
+- **Badge "new"**: small pill or circle, rotated ±15° for dynamism, max 3 words
+- **Overlay for legibility**: gradient black→transparent (opacity 50–70%), NEVER solid rectangle
+- **Drop shadow on text**: distance 0, size 8–15px, opacity 60–80%
+
+### Non-destructive workflow (ALWAYS)
+- All images → Smart Objects via place_image_as_background or place_image_at
+- Adjustment layers for color corrections (never flatten)
+- Save as layered PSD — do NOT flatten, do NOT export PNG as final deliverable
 
 ## Image generation with Google Labs Flow
 

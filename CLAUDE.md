@@ -98,3 +98,15 @@ Add a Python function in `tools/ps_executor.py` that builds a JSX string and cal
 2. Add a dispatch case in `_execute_tool()` in `agent.py`
 
 When writing JSX: use `_jsx_string(text)` to safely escape any user text that goes into JSX string literals. All hex colors convert via `_rgb(hex)` → `(r, g, b)` tuple.
+
+## Base de conocimiento de diseño
+
+Los siguientes archivos contienen el conocimiento técnico y conceptual de diseño que debe aplicarse en todo momento al trabajar con este agente. Son la referencia para decisiones de composición, tipografía, color, especificaciones de plataforma y workflows de Adobe.
+
+@knowledge/01-especificaciones-tecnicas.md
+@knowledge/02-composicion-visual.md
+@knowledge/03-tipografia.md
+@knowledge/04-color.md
+@knowledge/05-adobe-workflows.md
+@knowledge/06-formatos-exportacion.md
+@knowledge/07-sistemas-design.md
