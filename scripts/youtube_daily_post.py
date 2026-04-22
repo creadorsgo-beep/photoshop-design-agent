@@ -255,17 +255,31 @@ def main():
     log("Generating AI image with Adobe Firefly (may take ~30s)...")
     ps_generate_image("Fondo IA", data["image_prompt"], "photo")
 
-    # 7. Dark gradient overlay for text readability
-    log("Adding overlay...")
+    # 7. Solid color dark panel (y=470→1080, navy #050814, 73% opacity)
+    #    + soft gradient overlay on top (feather=120, 38% opacity)
+    #    → replicates the improved template design
+    log("Adding dark panel + gradient overlay...")
+    panel_result = ps_create_pixel_layer("Panel oscuro")
+    panel_id = find_layer_id(panel_result.get("layers", []), "Panel oscuro")
+    if panel_id:
+        ps_select_rectangle(
+            panel_id,
+            {"top": 470, "left": 0, "right": 1080, "bottom": 1080},
+            feather=0
+        )
+        ps_fill_selection(panel_id, {"red": 5, "green": 8, "blue": 20}, opacity=100)
+        _ps("setLayerProperties", {"layerId": panel_id, "layerOpacity": 73, "blendMode": "NORMAL"})
+
     ov_result = ps_create_pixel_layer("Overlay")
     ov_id = find_layer_id(ov_result.get("layers", []), "Overlay")
     if ov_id:
         ps_select_rectangle(
             ov_id,
-            {"top": 520, "left": 0, "right": 1080, "bottom": 1080},
+            {"top": 370, "left": 0, "right": 1080, "bottom": 1080},
             feather=120
         )
-        ps_fill_selection(ov_id, {"red": 0, "green": 0, "blue": 0}, opacity=82)
+        ps_fill_selection(ov_id, {"red": 0, "green": 0, "blue": 0}, opacity=100)
+        _ps("setLayerProperties", {"layerId": ov_id, "layerOpacity": 38, "blendMode": "NORMAL"})
 
     # 8. Text layers (centered, HelveticaNeue Bold)
     log("Adding text layers...")
