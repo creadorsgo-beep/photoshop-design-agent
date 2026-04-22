@@ -23,9 +23,8 @@ NODE_EXE    = "C:/Program Files/Adobe/Adobe Photoshop 2026/node.exe"
 OUTPUT_DIR  = PROJECT_DIR / "output"
 LOGS_DIR    = PROJECT_DIR / "logs"
 
-CHANNEL_URL  = "https://www.youtube.com/@100biblialuisvalladare2/videos"
-CHANNEL_NAME = "100% Biblia - Luis Valladares"
-FONT_BOLD    = "HelveticaNeueLTStd-BdEx"
+CHANNEL_URL   = "https://www.youtube.com/@100biblialuisvalladare2/videos"
+TEMPLATE_PATH = "C:/Users/Estudio Creador/Documents/plantilla youtube.psd"
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
@@ -71,65 +70,29 @@ def ps_init():
 def _ps(cmd_name, params):
     return _send_cmd(_create_cmd(cmd_name, params))
 
-def ps_create_document(name, w=1080, h=1080, res=72):
-    return _ps("createDocument", {
-        "documentName": name, "width": w, "height": h,
-        "resolution": res, "fillColor": {"red": 0, "green": 0, "blue": 0},
-        "colorMode": "RGB"
-    })
-
 def ps_generate_image(layer_name, prompt, content_type="photo"):
     return _ps("generateImage", {
         "layerName": layer_name, "prompt": prompt, "contentType": content_type
     })
 
-def ps_create_pixel_layer(name):
-    return _ps("createPixelLayer", {"layerName": name, "fillNeutral": False, "opacity": 100})
 
-def ps_select_rectangle(layer_id, bounds, feather=0):
-    return _ps("selectRectangle", {
-        "layerId": layer_id, "bounds": bounds, "feather": feather, "antiAlias": True
-    })
-
-def ps_fill_selection(layer_id, color, opacity=100):
-    return _ps("fillSelection", {
-        "layerId": layer_id, "color": color, "blendMode": "NORMAL", "opacity": opacity
-    })
-
-def ps_save_as(file_path, file_type="JPG"):
-    return _ps("saveDocumentAs", {"filePath": file_path, "fileType": file_type})
-
-
-def ps_add_texts(title_l1, title_l2, bible_ref):
-    """Add all text layers centered via JSX (bypasses MCP bounds bug)."""
+def ps_update_texts(title_l1, title_l2, bible_ref):
+    """Update the template's named text layers via JSX."""
     from ps_executor import _eval
 
     def esc(s):
-        return s.replace("'", "\\'").replace('"', '\\"')
+        return s.replace("\\", "\\\\").replace("'", "\\'")
 
     jsx = f"""
 var doc = app.activeDocument;
-function addCenteredText(txt, font, size, r, g, b, topPx, heightPx, opacity) {{
-    var layer = doc.artLayers.add();
-    layer.kind = LayerKind.TEXT;
-    var ti = layer.textItem;
-    ti.kind = TextType.PARAGRAPHTEXT;
-    ti.contents = txt;
-    ti.font = font;
-    ti.size = new UnitValue(size, 'pt');
-    ti.color.rgb.red = r;
-    ti.color.rgb.green = g;
-    ti.color.rgb.blue = b;
-    ti.justification = Justification.CENTER;
-    ti.position = [new UnitValue(54, 'px'), new UnitValue(topPx, 'px')];
-    ti.width  = new UnitValue(972, 'px');
-    ti.height = new UnitValue(heightPx, 'px');
-    if (opacity !== 100) layer.opacity = opacity;
+for (var i = 0; i < doc.layers.length; i++) {{
+    var l = doc.layers[i];
+    if (l.kind === LayerKind.TEXT) {{
+        if (l.name === 'Titulo L1')  l.textItem.contents = '{esc(title_l1)}';
+        if (l.name === 'Titulo L2')  l.textItem.contents = '{esc(title_l2)}';
+        if (l.name === 'Referencia') l.textItem.contents = '{esc(bible_ref)}';
+    }}
 }}
-addCenteredText('{esc(title_l1)}', '{FONT_BOLD}', 76, 255, 255, 255, 715, 105, 100);
-addCenteredText('{esc(title_l2)}', '{FONT_BOLD}', 76, 255, 255, 255, 828, 105, 100);
-addCenteredText('{esc(bible_ref)}', '{FONT_BOLD}', 28, 212, 175, 55,  940,  60, 100);
-addCenteredText('{esc(CHANNEL_NAME)}', '{FONT_BOLD}', 20, 190, 190, 190, 1010, 50,  80);
 'done';
 """
     return _eval(jsx)
@@ -212,12 +175,6 @@ def log(msg):
     print(line, flush=True)
 
 
-def find_layer_id(layers, name):
-    for l in layers:
-        if l.get("name") == name:
-            return l["id"]
-    return None
-
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
@@ -247,50 +204,49 @@ def main():
     log(f"  Bible ref  : {data['bible_ref']}")
     log(f"  Img prompt : {data['image_prompt'][:70]}...")
 
-    # 5. Create Photoshop document
-    log("Creating 1080x1080 Photoshop document...")
-    ps_create_document(f"Post {datetime.now().strftime('%Y-%m-%d')}")
+    # 5. Open template
+    log("Opening template...")
+    from ps_executor import open_template, export_as_jpg, _eval
+    open_template(TEMPLATE_PATH)
 
-    # 6. Generate AI image (Firefly, photorealistic)
+    # 6. Rename existing "Fondo IA" so Firefly can create a fresh one on top
+    _eval("""
+var doc = app.activeDocument;
+for (var i = 0; i < doc.layers.length; i++) {
+    if (doc.layers[i].name === 'Fondo IA') { doc.layers[i].name = 'Fondo IA OLD'; break; }
+}
+'done';
+""")
+
+    # 7. Generate AI image with Firefly — lands on top of the layer stack
     log("Generating AI image with Adobe Firefly (may take ~30s)...")
     ps_generate_image("Fondo IA", data["image_prompt"], "photo")
 
-    # 7. Solid color dark panel (y=470→1080, navy #050814, 73% opacity)
-    #    + soft gradient overlay on top (feather=120, 38% opacity)
-    #    → replicates the improved template design
-    log("Adding dark panel + gradient overlay...")
-    panel_result = ps_create_pixel_layer("Panel oscuro")
-    panel_id = find_layer_id(panel_result.get("layers", []), "Panel oscuro")
-    if panel_id:
-        ps_select_rectangle(
-            panel_id,
-            {"top": 470, "left": 0, "right": 1080, "bottom": 1080},
-            feather=0
-        )
-        ps_fill_selection(panel_id, {"red": 5, "green": 8, "blue": 20}, opacity=100)
-        _ps("setLayerProperties", {"layerId": panel_id, "layerOpacity": 73, "blendMode": "NORMAL"})
+    # 8. Move new "Fondo IA" above "Fondo" (bottom) and delete the old one
+    _eval("""
+var doc = app.activeDocument;
+var newLayer = null, oldLayer = null, fondoLayer = null;
+for (var i = 0; i < doc.layers.length; i++) {
+    var l = doc.layers[i];
+    if (l.name === 'Fondo IA' && !newLayer) newLayer = l;
+    if (l.name === 'Fondo IA OLD') oldLayer = l;
+    if (l.name === 'Fondo') fondoLayer = l;
+}
+if (newLayer && fondoLayer) newLayer.move(fondoLayer, ElementPlacement.PLACEBEFORE);
+if (oldLayer) oldLayer.remove();
+'done';
+""")
 
-    ov_result = ps_create_pixel_layer("Overlay")
-    ov_id = find_layer_id(ov_result.get("layers", []), "Overlay")
-    if ov_id:
-        ps_select_rectangle(
-            ov_id,
-            {"top": 370, "left": 0, "right": 1080, "bottom": 1080},
-            feather=120
-        )
-        ps_fill_selection(ov_id, {"red": 0, "green": 0, "blue": 0}, opacity=100)
-        _ps("setLayerProperties", {"layerId": ov_id, "layerOpacity": 38, "blendMode": "NORMAL"})
+    # 9. Update template text layers
+    log("Updating text layers...")
+    ps_update_texts(data["title_l1"], data["title_l2"], data["bible_ref"])
 
-    # 8. Text layers (centered, HelveticaNeue Bold)
-    log("Adding text layers...")
-    ps_add_texts(data["title_l1"], data["title_l2"], data["bible_ref"])
-
-    # 9. Save JPG
+    # 10. Export JPG
     safe_title = re.sub(r"[^\w]", "_", title)[:40].lower()
     date_str   = datetime.now().strftime("%Y%m%d")
     out_path   = str(OUTPUT_DIR / f"{date_str}_{safe_title}.jpg")
     log(f"Saving to {out_path}...")
-    ps_save_as(out_path, "JPG")
+    export_as_jpg(out_path, quality=85)
 
     log(f"Done! Post saved: {out_path}")
     return out_path
