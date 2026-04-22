@@ -125,6 +125,31 @@ def read_sheet(sheet_id: str, range_: str = "") -> str:
     return "\n".join(lines)
 
 
+def read_sheet_rows(sheet_id: str, sheet_name: str = "") -> list[list]:
+    """
+    Return raw rows from the first (or named) sheet as a list of lists.
+    First row is treated as headers by callers.
+    """
+    creds   = _get_credentials()
+    service = build("sheets", "v4", credentials=creds)
+
+    if not sheet_name:
+        meta       = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+        sheet_name = meta["sheets"][0]["properties"]["title"]
+
+    result = (
+        service.spreadsheets()
+        .values()
+        .get(spreadsheetId=sheet_id, range=sheet_name)
+        .execute()
+    )
+    rows = result.get("values", [])
+    if not rows:
+        return []
+    max_cols = max(len(r) for r in rows)
+    return [r + [""] * (max_cols - len(r)) for r in rows]
+
+
 def read_document(doc_id: str) -> str:
     """
     Read a Google Document or Spreadsheet — auto-detects the file type.
