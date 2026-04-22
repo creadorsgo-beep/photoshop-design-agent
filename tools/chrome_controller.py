@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-FLOW_URL = "https://labs.google/flow/image-generation"
+FLOW_URL = "https://labs.google/fx/es-419/tools/flow/project/24f0781a-531a-443a-9ea1-e5e792dbe0a2"
 CDP_URL = "http://localhost:9222"
 OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
@@ -174,10 +174,15 @@ def generate_image_flow(
         page = _get_or_create_page(browser, FLOW_URL)
         time.sleep(2)
 
-        # Navigate to Flow if not already there
-        if "labs.google" not in page.url and "flow" not in page.url.lower():
-            page.goto(FLOW_URL, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(3)
+        # Navigate to Flow if not on the correct page (also catch 404 pages)
+        needs_nav = (
+            "labs.google" not in page.url
+            or "flow" not in page.url.lower()
+            or "/404" in page.url
+        )
+        if needs_nav:
+            page.goto(FLOW_URL, wait_until="networkidle", timeout=45000)
+            time.sleep(6)
 
         screenshot_before = _save_screenshot(page, "before")
 

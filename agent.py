@@ -40,6 +40,9 @@ from tools.chrome_controller import generate_image_flow, take_flow_screenshot, e
 
 client = anthropic.Anthropic()
 
+MODEL = "claude-sonnet-4-6"
+MAX_HISTORY_MESSAGES = 20  # first user msg + last N-1 to cap context growth
+
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
@@ -547,6 +550,7 @@ TOOLS = [
             },
             "required": ["file_path", "x", "y", "width", "height"],
         },
+        "cache_control": {"type": "ephemeral"},
     },
 ]
 
@@ -558,11 +562,24 @@ def _execute_tool(name: str, tool_input: dict) -> str:
     try:
         if name == "analyze_reference_psd":
             result = analyze_psd(tool_input["file_path"])
-            return json.dumps(result, indent=2)
+            slim = {
+                "canvas": result.get("canvas", {}),
+                "color_palette": result.get("color_palette", [])[:8],
+                "fonts": result.get("fonts", [])[:5],
+                "design_patterns": result.get("design_patterns", {}),
+                "text_elements": result.get("text_elements", [])[:6],
+            }
+            return json.dumps(slim)
 
         elif name == "analyze_design_folder":
             result = analyze_folder(tool_input["folder_path"])
-            return json.dumps(result, indent=2)
+            slim = {
+                "canvas_sizes": result.get("canvas_sizes", []),
+                "color_palette": result.get("color_palette", [])[:10],
+                "fonts": result.get("fonts", [])[:6],
+                "design_patterns": result.get("design_patterns", {}),
+            }
+            return json.dumps(slim)
 
         elif name == "save_client_style":
             result = save_client_style(
@@ -732,12 +749,22 @@ def run_agent(user_request: str, verbose: bool = True) -> str:
         if verbose:
             print("Thinking...")
 
+        # Trim history to avoid unbounded context growth (keep first user msg + last N)
+        if len(messages) > MAX_HISTORY_MESSAGES:
+            messages = [messages[0]] + messages[-(MAX_HISTORY_MESSAGES - 1):]
+
         with client.messages.stream(
-            model="claude-opus-4-7",
+            model=MODEL,
             max_tokens=8192,
-            thinking={"type": "adaptive"},
-            system=SYSTEM_PROMPT,
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             tools=TOOLS,
+            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
             messages=messages,
         ) as stream:
             response = stream.get_final_message()
